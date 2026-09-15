@@ -110,7 +110,7 @@ func (this *Server) ListenMessage() {
 
 // 将信息发送到message管道
 func (this *Server) BroadCast(user *User, msg string) {
-	sendMsg := "{" + user.Addr + "}" + user.Name + ":" + msg
+	sendMsg := "[" + user.Addr + "]" + user.Name + ":" + msg
 
 	this.Message <- sendMsg
 }
