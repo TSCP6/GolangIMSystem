@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"strings"
 )
 
 type User struct {
@@ -54,7 +55,7 @@ func (this *User) Offline() {
 	this.server.BroadCast(this, "下线")
 }
 
-func (this *User) SetMessage(msg string){
+func (this *User) SendMessage(msg string){
 	this.conn.Write([]byte(msg))
 }
 
@@ -65,9 +66,26 @@ func (this *User) HandleMessage(msg string) {
 		this.server.maplock.Lock()
 		for _, user := range this.server.OnlineMap {
 			onlineMsg := "[" + user.Addr + "]" + user.Name + ":" + "在线...\n"
-			this.SetMessage(onlineMsg)
+			this.SendMessage(onlineMsg)
 		}
 		this.server.maplock.Unlock()
+	} else if len(msg) > 7 && msg[:7] == "rename|" {
+		// 消息格式: rename|your_name
+		newName := strings.Split(msg, "|")[1]
+
+		// 判断name是否存在
+		_, ok := this.server.OnlineMap[newName]
+		if ok {
+			this.SendMessage("当前用户名已被使用\n")
+		} else {
+			this.server.maplock.Lock()
+			delete(this.server.OnlineMap, this.Name)
+			this.server.OnlineMap[newName] = this
+			this.server.maplock.Unlock()
+
+			this.Name = newName
+			this.SendMessage("已更新用户名:" + this.Name + "\n")
+		}
 	} else {
 		this.server.BroadCast(this, msg)
 	}
