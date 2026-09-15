@@ -3,11 +3,19 @@ package main
 import (
 	"fmt"
 	"net"
+	"sync"
 )
 
 type Server struct {
 	Ip   string
 	Port int
+
+	// 在线用户的列表
+	OnlineMap map[string]*User
+	maplock sync.RWMutex
+
+	// 消息传播的channel
+	Message chan string
 }
 
 // 创建一个server接口
@@ -15,6 +23,8 @@ func NewServer(ip string, port int) *Server {
 	server := &Server{
 		Ip:   ip,
 		Port: port,
+		OnlineMap: make(map[string]*User),
+		Message: make(chan string),
 	}
 
 	return server
@@ -32,6 +42,9 @@ func (this *Server) Start() {
 	// close listen socket
 	defer listener.Close()
 
+	// 启动监听Message的goroutine
+	go this.ListenMessage()
+
 	for {
 		// accept
 		conn, err := listener.Accept()
@@ -46,5 +59,39 @@ func (this *Server) Start() {
 }
 
 func (this *Server) Handler(conn net.Conn) {
-	fmt.Println("连接建立成功")
+	// fmt.Println("连接建立成功")
+
+	user := NewUser(conn)
+
+	// 将用户加入到OnlineMap中
+	this.maplock.Lock()
+	this.OnlineMap[user.Name] = user
+	this.maplock.Unlock()
+
+	// 广播当前用户上线信息
+	this.BroadCast(user, "已上线")
+
+	// 当前Handler阻塞
+
+}
+
+// 监听message广播消息channel的goroutine，一旦有消息就发送给全部的在线user
+func (this *Server) ListenMessage() {
+	for {
+		msg := <- this.Message
+
+		// 将msg发送到所有在线的user
+		this.maplock.Lock()
+		for _, cli := range this.OnlineMap {
+			cli.C <- msg
+		}
+		this.maplock.Unlock()
+	}
+}
+
+// 将信息发送到message管道
+func (this *Server) BroadCast(user *User, msg string) {
+	sendMsg := "{" + user.Addr + "}" + user.Name + ":" + msg
+
+	this.Message <- sendMsg
 }
