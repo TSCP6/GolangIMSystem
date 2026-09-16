@@ -62,6 +62,73 @@ func (client *Client) DealServerResponse() {
 	io.Copy(os.Stdout, client.conn)
 }
 
+func (client *Client) PublicChat() {
+	// 提示用户输入消息
+	var chatMsg string
+
+	fmt.Println("请输入聊天内容, exit退出.")
+	fmt.Scanln(&chatMsg)
+
+	for chatMsg != "exit" {
+		// 消息不为空就发送
+		if len(chatMsg) != 0 {
+			msg := chatMsg + "\n"
+			_, err := client.conn.Write([]byte(msg))
+			if err != nil {
+				fmt.Println("conn.Write err:", err)
+				break
+			}
+		}
+
+		chatMsg = ""
+		fmt.Println("请输入聊天内容, exit退出.")
+		fmt.Scanln(&chatMsg)
+	}
+}
+
+func (client *Client) SelectOnlineUsers() {
+	msg := "who\n"
+	_, err := client.conn.Write([]byte(msg))
+	if err != nil {
+		fmt.Println("conn.Write err:", err)
+		return
+	}
+}
+
+func (client *Client) PrivateChat() {
+	var remoteName string
+	var chatMsg string
+
+	client.SelectOnlineUsers()
+	fmt.Println("请输入聊天对象[用户名], exit退出:")
+	fmt.Scanln(&remoteName)
+
+	for remoteName != "exit" {
+		fmt.Println("请输入聊天内容, exit退出.")
+		fmt.Scanln(&chatMsg)
+
+		for chatMsg != "exit" {
+			// 消息不为空就发送
+			if len(chatMsg) != 0 {
+				msg := "to|" + remoteName + "|" + chatMsg + "\n"
+				_, err := client.conn.Write([]byte(msg))
+				if err != nil {
+					fmt.Println("conn.Write err:", err)
+					break
+				}
+			}
+
+			chatMsg = ""
+			fmt.Println("请输入聊天内容, exit退出.")
+			fmt.Scanln(&chatMsg)
+		}
+
+		client.SelectOnlineUsers()
+		fmt.Println("请输入聊天对象[用户名], exit退出:")
+		fmt.Scanln(&remoteName)
+	}
+}
+
 func (client *Client) UpdateName() bool {
 	fmt.Println("请输入用户名:")
 	fmt.Scanln(&client.Name)
@@ -83,10 +150,10 @@ func (client *Client) Run() {
 			// 根据不同的模式处理不同业务
 			switch client.flag {
 			case 1 :
-				fmt.Println("公聊模式选择...")
+				client.PublicChat()
 				break
 			case 2 :
-				fmt.Println("私聊模式选择...")
+				client.PrivateChat()
 				break
 			case 3 :
 				client.UpdateName()
