@@ -3,7 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net"
+	"os"
 )
 
 type Client struct {
@@ -54,9 +56,30 @@ func (client *Client) menu() bool {
 	}
 }
 
+// 处理server回应消息，直接显示到标准输出
+func (client *Client) DealServerResponse() {
+	// 永久监听client.conn的数据，并copy到标准输出上
+	io.Copy(os.Stdout, client.conn)
+}
+
+func (client *Client) UpdateName() bool {
+	fmt.Println("请输入用户名:")
+	fmt.Scanln(&client.Name)
+
+	msg := "rename|" + client.Name + "\n"
+	_, err := client.conn.Write([]byte(msg))
+	if err != nil {
+		fmt.Println("conn.Write err:", err)
+		return false
+	}
+	return true
+}
+
+
+
 func (client *Client) Run() {
 	for client.flag != 0 {
-		for client.menu() != true {
+		for client.menu() == true {
 			// 根据不同的模式处理不同业务
 			switch client.flag {
 			case 1 :
@@ -66,7 +89,7 @@ func (client *Client) Run() {
 				fmt.Println("私聊模式选择...")
 				break
 			case 3 :
-				fmt.Println("更新用户名选择...")
+				client.UpdateName()
 				break
 			}
 		}
@@ -90,6 +113,9 @@ func main() {
 		fmt.Println("---服务器连接失败---")
 		return 
 	}
+
+	// 单独开启一个goroutine处理server返回消息
+	go client.DealServerResponse()
 
 	fmt.Println("---服务器连接成功---")
 
