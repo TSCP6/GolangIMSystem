@@ -3,9 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
+	"strings"
+	"sync"
 )
 
 type Client struct {
@@ -14,6 +15,11 @@ type Client struct {
 	Name string
 	conn net.Conn
 	flag int // 当前client模式
+
+	// 控制是否允许把服务器返回的消息打印到屏幕
+	// 因为 DealServerResponse 运行在单独的 goroutine 中，需要用读写锁保护
+	printMu sync.RWMutex
+	printEnabled bool
 }
 
 func NewClient(serverIp string, serverPort int) *Client {
@@ -45,7 +51,11 @@ func (client *Client) menu() bool {
 	fmt.Println("3.更新用户名")
 	fmt.Println("0.退出")
 
-	fmt.Scanln(&flag)
+	// 检查输入，避免非法输入(非数字)时 flag 保持为 0 被误当成"退出"
+	if _, err := fmt.Scanln(&flag); err != nil {
+		fmt.Println("---请输入合法的数字---")
+		return false
+	}
 
 	if flag >= 0 && flag <= 3 {
 		client.flag = flag
@@ -56,10 +66,38 @@ func (client *Client) menu() bool {
 	}
 }
 
-// 处理server回应消息，直接显示到标准输出
+// 设置是否允许把服务器消息打印到屏幕
+func (client *Client) SetPrint(enabled bool) {
+	client.printMu.Lock()
+	defer client.printMu.Unlock()
+	client.printEnabled = enabled
+}
+
+// 查询当前是否允许把服务器消息打印到屏幕
+func (client *Client) CanPrint() bool {
+	client.printMu.RLock()
+	defer client.printMu.RUnlock()
+	return client.printEnabled
+}
+
+// 处理server回应消息，仅在特定模式下才显示到标准输出
 func (client *Client) DealServerResponse() {
-	// 永久监听client.conn的数据，并copy到标准输出上
-	io.Copy(os.Stdout, client.conn)
+	buf := make([]byte, 4096)
+	for {
+		// 永久监听client.conn的数据
+		n, err := client.conn.Read(buf)
+		if err != nil {
+			fmt.Println("conn.Read err:", err)
+			return
+		}
+
+		msg := string(buf[:n])
+		// 私聊消息无视模式开关，始终显示；其他消息(公聊广播/who/改名等)
+		// 仅在允许打印的模式下输出，菜单等其他状态下只读取不打印，避免干扰输入
+		if strings.HasPrefix(msg, "[私聊]") || client.CanPrint() {
+			os.Stdout.Write(buf[:n])
+		}
+	}
 }
 
 func (client *Client) PublicChat() {
@@ -146,19 +184,28 @@ func (client *Client) UpdateName() bool {
 
 func (client *Client) Run() {
 	for client.flag != 0 {
-		for client.menu() == true {
-			// 根据不同的模式处理不同业务
-			switch client.flag {
-			case 1 :
-				client.PublicChat()
-				break
-			case 2 :
-				client.PrivateChat()
-				break
-			case 3 :
-				client.UpdateName()
-				break
-			}
+		// 处于菜单状态，关闭打印，避免服务器广播被输出到屏幕干扰输入
+		client.SetPrint(false)
+
+		if !client.menu() {
+			// 输入不合法，重新显示菜单
+			continue
+		}
+
+		// 根据不同的模式处理不同业务
+		switch client.flag {
+		case 1 :
+			// 进入公聊模式，允许打印服务器消息
+			client.SetPrint(true)
+			client.PublicChat()
+		case 2 :
+			// 进入私聊模式，允许打印服务器消息
+			client.SetPrint(true)
+			client.PrivateChat()
+		case 3 :
+			// 进入改名模式，允许打印服务器消息
+			client.SetPrint(true)
+			client.UpdateName()
 		}
 	}
 }

@@ -110,7 +110,7 @@ func (this *User) HandleMessage(msg string) {
 			return
 		}
 
-		remoteUser.SendMessage(this.Name + "对您说:" + content)
+		remoteUser.SendMessage("[私聊]" + this.Name + "对您说:" + content + "\n")
 	} else {
 		this.server.BroadCast(this, msg)
 	}
