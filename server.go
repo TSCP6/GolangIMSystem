@@ -102,7 +102,7 @@ func (this *Server) Handler(conn net.Conn) {
 			case <- isLive:
 				// 当前用户活跃，不做操作，用于select刷新计时器
 
-			case <- time.After(10 * time.Second):
+			case <- time.After(300 * time.Second):
 				// 超时，强制踢出用户
 				user.SendMessage("长时间不操做强制下线")
 
