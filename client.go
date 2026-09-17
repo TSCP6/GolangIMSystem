@@ -1,37 +1,56 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
 
+// 全局共享的行读取器：必须整个程序只用一个实例，
+// 否则 bufio 内部缓冲的数据会丢失
+var stdinReader = bufio.NewReader(os.Stdin)
+
+// readLine 打印提示并读取一整行输入(去掉行尾换行符)。
+// 使用整行读取而不是 fmt.Scanln，避免非法/多余输入残留在缓冲区，
+// 导致循环里多次打印提示内容
+func readLine(prompt string) string {
+	fmt.Print(prompt)
+	line, err := stdinReader.ReadString('\n')
+	if err != nil {
+		// stdin 被关闭(如 Ctrl+D)，返回 exit 让上层正常退出
+		return "exit"
+	}
+	return strings.TrimRight(line, "\r\n")
+}
+
 type Client struct {
-	ServerIp string
+	ServerIp   string
 	ServerPort int
-	Name string
-	conn net.Conn
-	flag int // 当前client模式
+	Name       string
+	conn       net.Conn
+	flag       int // 当前client模式
 
 	// 控制是否允许把服务器返回的消息打印到屏幕
 	// 因为 DealServerResponse 运行在单独的 goroutine 中，需要用读写锁保护
-	printMu sync.RWMutex
+	printMu      sync.RWMutex
 	printEnabled bool
 }
 
 func NewClient(serverIp string, serverPort int) *Client {
 	// 创建客户端对象
 	client := &Client{
-		ServerIp: serverIp,
+		ServerIp:   serverIp,
 		ServerPort: serverPort,
-		flag: 666,
+		flag:       666,
 	}
 
 	// 链接server
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", serverIp,serverPort))
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", serverIp, serverPort))
 	if err != nil {
 		fmt.Println("net.Dial error:", err)
 		return nil
@@ -44,26 +63,17 @@ func NewClient(serverIp string, serverPort int) *Client {
 }
 
 func (client *Client) menu() bool {
-	var flag int
+	// 整行读取后手动解析数字，非法输入不会残留在缓冲区
+	line := readLine("1.公聊模式\n2.私聊模式\n3.更新用户名\n0.退出\n请输入模式编号: ")
 
-	fmt.Println("1.公聊模式")
-	fmt.Println("2.私聊模式")
-	fmt.Println("3.更新用户名")
-	fmt.Println("0.退出")
-
-	// 检查输入，避免非法输入(非数字)时 flag 保持为 0 被误当成"退出"
-	if _, err := fmt.Scanln(&flag); err != nil {
+	flag, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil || flag < 0 || flag > 3 {
 		fmt.Println("---请输入合法的数字---")
 		return false
 	}
 
-	if flag >= 0 && flag <= 3 {
-		client.flag = flag
-		return true
-	} else {
-		fmt.Println("---请输入合法的数字---")
-		return false
-	}
+	client.flag = flag
+	return true
 }
 
 // 设置是否允许把服务器消息打印到屏幕
@@ -101,11 +111,7 @@ func (client *Client) DealServerResponse() {
 }
 
 func (client *Client) PublicChat() {
-	// 提示用户输入消息
-	var chatMsg string
-
-	fmt.Println("请输入聊天内容, exit退出.")
-	fmt.Scanln(&chatMsg)
+	chatMsg := readLine("请输入聊天内容, exit退出: \n")
 
 	for chatMsg != "exit" {
 		// 消息不为空就发送
@@ -118,9 +124,7 @@ func (client *Client) PublicChat() {
 			}
 		}
 
-		chatMsg = ""
-		fmt.Println("请输入聊天内容, exit退出.")
-		fmt.Scanln(&chatMsg)
+		chatMsg = readLine("请输入聊天内容, exit退出: \n")
 	}
 }
 
@@ -134,16 +138,11 @@ func (client *Client) SelectOnlineUsers() {
 }
 
 func (client *Client) PrivateChat() {
-	var remoteName string
-	var chatMsg string
-
 	client.SelectOnlineUsers()
-	fmt.Println("请输入聊天对象[用户名], exit退出:")
-	fmt.Scanln(&remoteName)
+	remoteName := readLine("请输入聊天对象[用户名], exit退出: \n")
 
 	for remoteName != "exit" {
-		fmt.Println("请输入聊天内容, exit退出.")
-		fmt.Scanln(&chatMsg)
+		chatMsg := readLine("请输入聊天内容, exit退出: \n")
 
 		for chatMsg != "exit" {
 			// 消息不为空就发送
@@ -156,20 +155,16 @@ func (client *Client) PrivateChat() {
 				}
 			}
 
-			chatMsg = ""
-			fmt.Println("请输入聊天内容, exit退出.")
-			fmt.Scanln(&chatMsg)
+			chatMsg = readLine("请输入聊天内容, exit退出: \n")
 		}
 
 		client.SelectOnlineUsers()
-		fmt.Println("请输入聊天对象[用户名], exit退出:")
-		fmt.Scanln(&remoteName)
+		remoteName = readLine("请输入聊天对象[用户名], exit退出: \n")
 	}
 }
 
 func (client *Client) UpdateName() bool {
-	fmt.Println("请输入用户名:")
-	fmt.Scanln(&client.Name)
+	client.Name = readLine("请输入用户名: \n")
 
 	msg := "rename|" + client.Name + "\n"
 	_, err := client.conn.Write([]byte(msg))
@@ -179,8 +174,6 @@ func (client *Client) UpdateName() bool {
 	}
 	return true
 }
-
-
 
 func (client *Client) Run() {
 	for client.flag != 0 {
@@ -194,15 +187,15 @@ func (client *Client) Run() {
 
 		// 根据不同的模式处理不同业务
 		switch client.flag {
-		case 1 :
+		case 1:
 			// 进入公聊模式，允许打印服务器消息
 			client.SetPrint(true)
 			client.PublicChat()
-		case 2 :
+		case 2:
 			// 进入私聊模式，允许打印服务器消息
 			client.SetPrint(true)
 			client.PrivateChat()
-		case 3 :
+		case 3:
 			// 进入改名模式，允许打印服务器消息
 			client.SetPrint(true)
 			client.UpdateName()
@@ -225,7 +218,7 @@ func main() {
 	client := NewClient(serverIp, serverPort)
 	if client == nil {
 		fmt.Println("---服务器连接失败---")
-		return 
+		return
 	}
 
 	// 单独开启一个goroutine处理server返回消息
